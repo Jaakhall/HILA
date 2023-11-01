@@ -109,8 +109,13 @@ void update_parity_dir(GaugeField<group> &U, const parameters &p, Parity par, Di
     if (relax) {
 
         or_timer.start();
+
         onsites(par) {
+#ifdef SUN_OVERRELAX_dFJ
+            suN_overrelax_dFJ(U[d][X], staples[X], p.beta);
+#else
             suN_overrelax(U[d][X], staples[X]);
+#endif
         }
         or_timer.stop();
 
@@ -182,7 +187,7 @@ int main(int argc, char **argv) {
     p.n_thermal = par.get("thermalization");
 
     // random seed = 0 -> get seed from time
-    long seed = par.get("random seed");
+    uint64_t seed = par.get("random seed");
     // save config and checkpoint
     p.n_save = par.get("traj/saved");
     // measure surface properties and print "profile"
