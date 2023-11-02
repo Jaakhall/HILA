@@ -1,4 +1,113 @@
+
 /**
 
-\page multi_canonical Multi Canonical
+\page multi_canonical Multicanonical
+
+Multicanonical Monte Carlo methods are useful when it is in interest to sample highly suppressed regions of the system phase space. This is achieved through an artificial weighting procedure that attempts to compensate the differences in the canonical probability distribution. Ideally the multicanonical probabilitity distribution ends up as an easy to sample uniform distribution. The unphysical effects of the weighting can be removed in the data analysis afterwards, given that the weight corresponding to each measurement is saved during the MC computation. The weighting procedure is based on some real parameter that differentiates between the suppressed and unsuppressed regions. This quantity is referred to as the "order parameter", although in general its not a true order parameter in the physical sense. The weighting is based on this quantity as follows:
+
+Suppose the system consists of field(s) \f$\phi\f$ and the \e canonical probability density configuration is \f$P_\mathrm{ca}(\phi) \propto \exp(-S(\phi))\f$. By rather considering the modified \e multicanonical probability density, \f$P_\mathrm{muca}(\phi) \propto \exp(-[S(\phi) + W(\phi)])\f$ any canonical expectation value of an observable \f$\mathcal{O}\f$ can be obtained by sampling the flat multicanonical distribution and removing the weighting afterwards
+
+\f{equation}{
+\langle \mathcal{O} \rangle_\mathrm{ca} = \frac{1}{N} \sum_i \mathcal{O(\phi_i)} \exp(W(\phi_i))
+\f}
+
+where \f$\phi_i\f$ were drawn from the multicanonical distribution. The multicanonical utility helps the user in largely automating this process (given there readily exists a way to sample the relevant canonical distribution). Firstly, the weight function \f$W\f$ is not known beforehand, since the optimal choice exactly corresponds to knowing the precise form of the canonical distribution under investigation. Hence, the weight function is obtained by an iterative process practically automated by the tool. Further, the multicanonical accept-reject update is also available. These functionalities are showcased by an example program below.
+
+The main file is similar to the other examples aside from some minor differences. In addition to initialising the lattice, we also initialise the multicanonical tool by giving it the path to the parameter file which we've opted to call `"muca_parameters"`. The initialisation must be performed before using any other parts of the tool.
+~~~cpp
+    hila::muca::initialise("weight_parameters");
+~~~
+
+For illustrative purposes we consider a single real scalar field that has a potential with two degenerate minima at \f$ \phi(x) \approx 0.7 \f$ separated by a relatively large potential barrier. We discretise the action at lattice site `X` as
+~~~cpp
+Field<double> compute_local_action(Field<double> phi)
+{
+    Field<double> action;
+    // The potential
+    onsites(ALL)
+    {
+        action[X] = - pow(phi[X], 2) + pow(phi[X], 4);
+    }
+    // gradient term
+    foralldir(d) onsites(ALL)
+    {
+        action[X] += pow(phi[X] - phi[X - d], 2);
+        action[X] += pow(phi[X + d] - phi[X], 2);
+    }
+    return action;
+}
+~~~
+
+We want to be able to sample the configurations in both of the minima as well as the ones in-between. For this purpose we define the order parameter as the mean value of \f$\phi(x)\f$, as on (e.g.) the interval \f$ [-0.6, 0.6] \f$ it should cover the phase space of interest well (this is not immediately obvious from the potential, but can be checked using a standard canonical computation).
+~~~cpp
+double order_parameter(Field<double> &phi)
+{
+    double OP = phi.sum();
+    return OP / lattice.volume();
+}   
+~~~
+
+Using these definitions, a standard Metropolis-Hastings update algorithm is implemented. In order sample from the multicanonical update, the canonical update must further be accepted by a multicanonical accept-reject step. For this purpose the order parameter of the new and old configuration are computed and fed to "hila::muca::accept_reject()" and based on the returned boolean the canonical update is either accepted or rejected.
+~~~cpp
+    // Section from the end of `multican_update`
+
+    double OP_old = order_parameter(phi);
+    double OP_new = order_parameter(new_phi);
+    
+    // Use the multicanonical accept_reject for a final update decision
+    if (hila::muca::accept_reject(OP_old, OP_new))
+    {
+        phi = new_phi;
+    }
+~~~
+
+If you had the weight function ready, you could read it in and start the measurements right away. Assuming that we don't, we define a function to handle the iteration of the weights. We define a loop with the condition given by `hila::muca::iterate_weights()`, to which, on each iteration, we feed the order parameter of the current configuration. Essentially, we simply run the update and insert the obtained order parameters to the function for as long as it tells us to. Once the iteration is deemed finished, the weight function is written out to a file for safekeeping. Note that the multicanonical tool retains the knowledge of the weight function internally.
+~~~cpp
+void iterate_weights(Field<double> &phi)
+{
+    bool iterate_status = true;
+    while(iterate_status)
+    {
+        // Perform a number of updates
+        for (int i = 0; i < 10; i++)
+        {
+            multican_update(phi, ODD);
+            multican_update(phi, EVEN);
+        }
+        // compute and feed the order parameter of the configuration to the
+        // iterator
+        double OP = order_parameter(phi);
+        iterate_status = hila::muca::iterate_weights(OP);
+    }
+    hila::muca::write_weight_function(hila::muca::generate_outfile_name());
+}
+~~~
+
+Continuing with the `main` function we of course iterate the weights using the previous function and then perform an entirely standard run of measurements where we save measure the order parameter and save it to the file. Using `hila::muca::weight()` the user can access the weight function for this use.
+~~~cpp
+    // Iterate the weight function
+    iterate_weights(phi);
+
+    // Get some measurements
+    for (int i = 1; i <= 1000; i++)
+    {
+        double OP = order_parameter(phi);
+        char buffer[1024];
+        // Remember that you need the weight of each measured configuration
+        // for the post-processing!
+        sprintf(buffer, "%d\t%e\t%e\n", i, OP, hila::muca::weight(OP));
+        if (hila::myrank() == 0) MFile << std::string(buffer);
+
+        if (i % 100 == 0)
+            hila::out0 << i / 10 << "% done\n";
+        // Perform a set of updates
+        for (int i = 0; i < 50; i++)
+        {
+            multican_update(phi, ODD);
+            multican_update(phi, EVEN);
+        }
+    }
+~~~
+
+It is instructive to compare the difference between canonical and multicanonical runs for the system at hand. When running the example program, a command line argument `muca` performs a multicanonical simulation, while `ca` yields a canonical one (leaves the weight function as a constant).
 */
