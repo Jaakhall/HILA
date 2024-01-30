@@ -62,6 +62,12 @@ void set_weight_iter_flag(bool YN);
 // This function is to always be called before using any of the above functions
 void initialise(const std::string wfile_name);
 
+// Access some of the internal variables from the program
+void muca_min_OP(double &value, bool modify = false);
+void muca_max_OP(double &value, bool modify = false);
+
+// enable/disable hard walls for the order parameter
+void hard_walls(bool YN);
 ////////////////////////////////////////////////////////////////////////////////
 // Static functions are internal to above methods. See .cpp file for details
 ////////////////////////////////////////////////////////////////////////////////
