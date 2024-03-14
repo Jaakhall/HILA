@@ -931,7 +931,7 @@ static void initialise_weight_vectors()
         int N = g_WParam.bin_number;
         g_WValues        = vector(N, 0.0);
         g_OPValues       = vector(N, 0.0);
-        g_OPBinLimits   = vector(N + 1, 0.0);
+        g_OPBinLimits    = vector(N + 1, 0.0);
 
         setup_equidistant_bins();
 
