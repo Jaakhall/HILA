@@ -18,7 +18,6 @@ using vector = std::vector<double>;
 
 struct canonical_iteration;
 struct direct_iteration;
-struct weight_iteration_parameters;
 
 typedef bool (* finish_condition_pointer)(std::vector<int> &visits);
 
@@ -456,19 +455,18 @@ double weight_function(double OP)
 {
     double val;
     // If out of range, constant extrapolation or for hard walls, num inf.
-    if (OP <= g_OPValues.front())
+    if ((g_WParam.hard_walls) and
+       ((OP < g_WParam.min_OP) or (OP > g_WParam.max_OP)))
     {
-        if (g_WParam.hard_walls)
-            val = std::numeric_limits<double>::infinity();
-        else
-            val = g_WValues.front();
+        val = std::numeric_limits<double>::infinity();
+    }
+    else if (OP <= g_OPValues.front())
+    {
+        val = g_WValues.front();
     }
     else if (OP >= g_OPValues.back())
     {
-        if (g_WParam.hard_walls)
-            val = std::numeric_limits<double>::infinity();
-        else
-            val = g_WValues.back();
+        val = g_WValues.back();
     }
     // Otherwise find interval, calculate slope, base index, etc.
     // Basic linear interpolation to obtain the weight value.
@@ -550,20 +548,29 @@ bool accept_reject(const double OP_old, const double OP_new)
         double W_new = weight_function(OP_new);
         double W_old = weight_function(OP_old);
 
-        // get log(exp(-delta(W))) = -delta(W)
-        // (just like -delta(S) in Metropolis-Hastings)
-        double log_P = - (W_new - W_old);
-
-        // Get a random uniform from [0,1] and return a boolean indicating
-        // whether the update is to be accepted.
-        double rval = hila::random();
-        if (::log(rval) < log_P)
+        // This happens when hard walls are active and OP_new
+        // is out of bounds
+        if (W_new > std::numeric_limits<double>::max())
         {
-            update = true;
+            update = false;
         }
         else
         {
-            update = false;
+            // get log(exp(-delta(W))) = -delta(W)
+            // (just like -delta(S) in Metropolis-Hastings)
+            double log_P = - (W_new - W_old);
+
+            // Get a random uniform from [0,1] and return a boolean indicating
+            // whether the update is to be accepted.
+            double rval = hila::random();
+            if (::log(rval) < log_P)
+            {
+                update = true;
+            }
+            else
+            {
+                update = false;
+            }
         }
 
         // Get value from process 0
@@ -924,7 +931,7 @@ static void initialise_weight_vectors()
         int N = g_WParam.bin_number;
         g_WValues        = vector(N, 0.0);
         g_OPValues       = vector(N, 0.0);
-        g_OPBinLimits   = vector(N + 1, 0.0);
+        g_OPBinLimits    = vector(N + 1, 0.0);
 
         setup_equidistant_bins();
 
@@ -1035,8 +1042,9 @@ static bool iterate_weight_function_direct_single(double OP)
             g_N_OP_BinTotal[bin_index] += 1;
 
         g_WeightIterationCount += 1;
-
         g_WValues[bin_index] += g_WParam.DIP.C;
+
+        continue_iteration = true;
 
         if (g_WeightIterationCount % g_WParam.DIP.single_check_interval == 0)
         {
@@ -1066,7 +1074,6 @@ static bool iterate_weight_function_direct_single(double OP)
             hila::out0 << "New update size C = " << g_WParam.DIP.C << "\n\n";
         }
 
-        continue_iteration = true;
         if (g_WParam.DIP.C < g_WParam.DIP.C_min)
         {
             hila::out0 << "Reached minimum update size.\n";
@@ -1109,7 +1116,7 @@ static void print_iteration_histogram()
         {
             n_sum_hist += "|";
         }
-        printf("%-20.3f%-20.3f%d\t\t\t%s\n", g_OPValues[m],
+        printf("%-20.7f%-20.7f%d\t\t\t%s\n", g_OPValues[m],
                 g_WValues[m], g_N_OP_Bin[m], n_sum_hist.c_str());
     }
 }
@@ -1178,6 +1185,18 @@ void set_continuous_iteration(bool YN)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+/// @brief Enable/disable hard OP walls
+/// @details Premits the user to enable/disable hard OP walls when evaluating
+///          a weight value outside of the interval [min_OP, max_OP].
+///
+/// @param YN   enable (true) or disable (false) hard limits on OP
+////////////////////////////////////////////////////////////////////////////////
+void hard_walls(bool YN)
+{
+    if (hila::myrank() == 0) g_WParam.hard_walls = YN;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 /// @brief Loads parameters and weights for the multicanonical computation.
 /// @details Sets up iteration variables. Can be called multiple times and must
 ///          be called at least once before attempting to use any of the muca
@@ -1204,6 +1223,38 @@ void initialise(const string wfile_name)
 
     // Choose an iteration method (or the default)
     setup_iteration();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief Returns the value of g_WParam.OP_min
+///
+/// @return  value of OP_min
+////////////////////////////////////////////////////////////////////////////////
+void muca_min_OP(double &value, bool modify)
+{
+    if (modify)
+    {
+        if (hila::myrank() == 0) g_WParam.min_OP = value;
+        hila::out0 << "min_OP set to new value " << g_WParam.min_OP << "\n";
+    }
+    else
+        value = g_WParam.min_OP;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief Returns the value of g_WParam.max_OP
+///
+/// @return  value of max_OP
+////////////////////////////////////////////////////////////////////////////////
+void muca_max_OP(double &value, bool modify)
+{
+    if (modify)
+    {
+        if (hila::myrank() == 0) g_WParam.max_OP = value;
+        hila::out0 << "max_OP set to new value " << g_WParam.max_OP << "\n";
+    }
+    else
+        value = g_WParam.max_OP;
 }
 
 }
