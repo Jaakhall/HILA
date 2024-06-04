@@ -17,40 +17,9 @@ using string = std::string;
 using int_vector = std::vector<int>;
 using vector = std::vector<double>;
 
-struct canonical_iteration;
 struct direct_iteration;
 
 typedef bool (* finish_condition_pointer)(std::vector<int> &visits);
-
-// Structs to encompass the various options related to
-// iteration of the multicanonical weights.
-////////////////////////////////////////////////////////////////////////////////
-/// @struct canonical_iteration
-/// @brief An internal struct parametrising the canonical weight
-/// iteration method.
-///
-/// @var int canonical_iteration::sample_size
-/// @brief Number of samples before weight function update
-///
-/// @var int canonical_iteration::initial_bin_hits
-/// @brief Initial number of entries in the bin totals
-/// @details Larger number makes the weight less susceptible to changes in the
-/// following iterations.
-///
-/// @var int canonical_iteration::OC_max_iter
-/// @brief Up to which iteration the overcorrection updates can be used
-///
-/// @var int canonical_iteration::OC_frequency
-/// @brief How often the overcorrection update is used
-/// @details If the value is n, every n:th update will be an overcorrection.
-///////////////////////////////////////////////////////////////////////////////
-struct canonical_iteration
-{
-    int sample_size;
-    int initial_bin_hits;
-    int OC_max_iter;
-    int OC_frequency;
-};
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @struct direct_iteration
@@ -142,9 +111,6 @@ struct direct_iteration
 ///
 /// @var struct direct_iteration weight_iteration_parameters::DIP
 /// @brief A substruct that contains method specific parameters
-///
-/// @var struct canonical_iteration weight_iteration_parameters::CIP
-/// @brief A substruct that contains method specific parameters
 ///////////////////////////////////////////////////////////////////////////////
 struct weight_iteration_parameters
 {
@@ -159,7 +125,6 @@ struct weight_iteration_parameters
     int bin_number;
     bool AR_iteration;
     struct direct_iteration DIP;
-    struct canonical_iteration CIP;
 };
 
 // File global parameter struct filled by read_weight_parameters
@@ -183,8 +148,9 @@ namespace hila
 namespace muca
 {
 
-// Pointer to the iteration function
+// Pointers to the iteration functions
 iteration_pointer iterate_weights;
+chain_iteration_pointer iterate_chains;
 
 // Pointer to the finish condition check
 finish_condition_pointer finish_check;
@@ -274,16 +240,7 @@ void read_weight_parameters(string parameter_file_name)
         add_initial
     };
 
-    struct canonical_iteration CIP
-    {
-        CIM_sample_size,
-        initial_bin_hits,
-        OC_max_iter,
-        OC_frequency
-    };
-
     bool AR_ITER = false;
-
     bool visuals;
     if (iter_vis.compare("YES") == 0)
         visuals = true;
@@ -305,114 +262,12 @@ void read_weight_parameters(string parameter_file_name)
         min_OP,
         bin_number,
         AR_ITER,
-        DIP,
-        CIP
+        DIP
     };
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief
-/// Reads a precomputed weight function from file.
-/// @details
-/// The input file is to have three tab-separated columns:
-/// 1. bin edges, of length n + 1
-/// 2. bin centres, of length n
-/// 3. weight values, of length n
-///
-/// Naturally, column 2 can be determined from the first one
-/// but they are considered a separated input anyways.
-///
-/// The header can be whatever* and is always skipped. Regex finds the
-/// data by finding first row with the substring "OP_value" and
-/// assumes that the following contains the data as specified above.
-///
-/// *Avoid substring "OP_value"
-///
-/// @param W_function_filename
-////////////////////////////////////////////////////////////////////////////////
-//void read_weight_function(string W_function_filename)
-//{
-//    hila::out0 << "\nLoading the user supplied weight function.\n";
-//    // Compute first header length by counting lines until finding
-//    // the column header through regex.
-//    if (hila::myrank() == 0)
-//    {
-//        int header_length = 1, data_length = -1;
-//        std::ifstream W_file;
-//        W_file.open(W_function_filename.c_str());
-//        if (W_file.is_open())
-//        {
-//            string line;
-//            while(std::getline(W_file, line))
-//            {
-//                if (std::regex_match(line, std::regex(".*OP_value.*")))
-//                    data_length = 0;
-//
-//                if (data_length < 0)
-//                    header_length += 1;
-//                else
-//                    data_length += 1;
-//            }
-//        }
-//        W_file.close();
-//        W_file.open(W_function_filename.c_str());
-//
-//        // Skip the header and sscanf the values and add them into the vectors.
-//        int count = - header_length;
-//        data_length -= 1;
-//        printf("Weight function has header length of %d rows.\n",
-//                header_length);
-//        printf("Weight function has data length of %d rows.\n",
-//                data_length);
-//        printf("Reading the weight function into the program.\n");
-//
-//        // Initialise the weight vectors to correct dimensions
-//        g_OPBinLimits = vector(data_length);
-//        g_OPValues    = vector(data_length - 1);
-//        g_WValues     = vector(data_length - 1);
-//
-//        // Read in the values. Note that g_OPBinLimits has one more entry than
-//        // the weight vector.
-//        if (W_file.is_open())
-//        {
-//            string line;
-//            while (std::getline(W_file, line))
-//            {
-//                float bin_lim, weight, centre;
-//                // Read lower bin limits and corresponding weights.
-//                if (count >= 0 and count < data_length - 1)
-//                {
-//                    sscanf(line.c_str(), "%e\t%e\t%e",
-//                           &bin_lim, &centre, &weight);
-//
-//                    g_OPBinLimits[count] = bin_lim;
-//                    g_OPValues[count] = centre;
-//                    g_WValues[count] = weight;
-//                }
-//                // And the rightmost bin limit.
-//                if (count == data_length - 1)
-//                {
-//                    sscanf(line.c_str(), "%e", &bin_lim);
-//                    g_OPBinLimits[count] = bin_lim;
-//                }
-//                count += 1;
-//            }
-//
-//        }
-//        W_file.close();
-//
-//        // Fill out bin centres for the interpolator.
-//        for (int i = 0; i < data_length - 1; i++)
-//        {
-//            g_OPValues[i] = (g_OPBinLimits[i + 1] + g_OPBinLimits[i]) / 2.0;
-//        }
-//    }
-//    hila::out0 << "\nSuccesfully loaded the user provided weight function.\n";
-//}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief
-/// Reads a precomputed weight function from file.
+/// @brief Reads a precomputed weight function from file.
 /// @details
 /// The input file is to have 2N + 1 rows with following contents:
 /// row 1:         weights of the used chains in their respective order as
@@ -492,8 +347,6 @@ void read_weight_function(string W_function_filename)
                     }
                 }
 
-
-
                 // Decide where to put the vector if nonempty
                 if (val_vec.size() > 0)
                 {
@@ -528,10 +381,11 @@ void read_weight_function(string W_function_filename)
         }
         W_file.close();
     }
-
     // Check afterwards that the lengths are consistent
     int N_BLvec = g_OPBinLimits.size();
     int N_WLvec = g_WValues.size();
+    //hila::out0 << N_WLvec << " " << N_BLvec << "\n";
+    //for (int i = 0; i < N_chains; i++) hila::out0 << g_WValues[i].size() << " " << g_OPBinLimits[i].size() << " ";
     if (N_chains != N_BLvec)
     {
         hila::out0 << "There are " << N_chains << " chains, but "
@@ -627,21 +481,77 @@ void write_weight_function(string W_function_filename)
         W_file.open(W_function_filename.c_str());
         //write_weight_file_header(W_file, FP, RP, g_WParam);
 
-        to_file(W_file, "%s", "OP_bin_limit\tOP_value\tWeight\n");
-        int i;
-        for (i = 0; i < g_OPValues.size(); ++i)
+        // Start with the chain weights
+        to_file(W_file, "BEGIN_DATA\n", 0);
+        for (int j = 0; j < g_ChainWValues.size(); j++)
+                to_file(W_file, "%e\t", g_ChainWValues[j]);
+        to_file(W_file, "\n", 0);
+        // Then bin limits and weight values chain by chain
+        for (int i = 0; i < g_ChainWValues.size(); ++i)
         {
-            to_file(W_file, "%e\t", g_OPBinLimits[i]);
-            to_file(W_file, "%e\t", g_OPValues[i]);
-            to_file(W_file, "%e\n", g_WValues[i]);
+            for (int j = 0; j < g_OPBinLimits[i].size(); j++)
+                to_file(W_file, "%e\t", g_OPBinLimits[i][j]);
+            to_file(W_file, "\n", 0);
+
+            
+            for (int j = 0; j < g_WValues[i].size(); j++)
+                to_file(W_file, "%e\t", g_WValues[i][j]);
+            to_file(W_file, "\n", 0);
         }
         // Remember to write the last bin upper limit
-        to_file(W_file, "%e\n", g_OPBinLimits[i]);
         W_file.close();
         printf("Succesfully saved the weight function into file\n%s\n",
                W_function_filename.c_str());
     }
 }
+
+//////////////////////////////////////////////////////////////////////////////////
+///// @brief Returns a weight associated to the used order parameter.
+///// @details The function uses supplied pairs of points to linearly interpolate
+/////          the function on the interval. This interpolant provides the
+/////          requested weights to be used as the multicanonical weight.
+/////
+///// @param  OP   value of the order parameter
+///// @return The value of the weight.
+//////////////////////////////////////////////////////////////////////////////////
+//double weight_function(const double OP, const int ci)
+//{
+//    double val;
+//    // If out of range, constant extrapolation or for hard walls, num inf.
+//    if ((g_WParam.hard_walls) and
+//       ((OP < g_OPValues[ci].front()) or (OP > g_OPValues[ci].back())))
+//    {
+//        val = std::numeric_limits<double>::infinity();
+//    }
+//    else if (OP <= g_OPValues[ci].front())
+//    {
+//        val = g_WValues[ci].front();
+//    }
+//    else if (OP >= g_OPValues[ci].back())
+//    {
+//        val = g_WValues[ci].back();
+//    }
+//
+//    // Otherwise find interval, calculate slope, base index, etc.
+//    // Basic linear interpolation to obtain the weight value.
+//    else
+//    {
+//        auto it = std::lower_bound(g_OPValues[ci].begin(),
+//                                   g_OPValues[ci].end(), OP);
+//        int j = std::distance(g_OPValues[ci].begin(), it) - 1;
+//        double y_value = g_WValues[ci][j + 1] - g_WValues[ci][j];
+//        double x_value = g_OPValues[ci][j + 1] - g_OPValues[ci][j];
+//        double slope = y_value / x_value;
+//
+//        double xbase = g_OPValues[ci][j];
+//        double ybase = g_WValues[ci][j];
+//
+//        double xdiff = OP - xbase;
+//        val = ybase + xdiff * slope;
+//    }
+//
+//    return val + g_ChainWValues[ci];
+//}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief Returns a weight associated to the used order parameter.
@@ -652,22 +562,22 @@ void write_weight_function(string W_function_filename)
 /// @param  OP   value of the order parameter
 /// @return The value of the weight.
 ////////////////////////////////////////////////////////////////////////////////
-double weight_function(double OP, int ci)
+static double weight_function(const double OP, const int ci)
 {
-    double val;
-    // If out of range, constant extrapolation or for hard walls, num inf.
-    if ((g_WParam.hard_walls) and
-       ((OP < g_WParam.min_OP) or (OP > g_WParam.max_OP)))
+    double val, slope, xdiff, ybase;
+    if (OP <= g_OPValues[ci].front())
     {
-        val = std::numeric_limits<double>::infinity();
-    }
-    else if (OP <= g_OPValues[ci].front())
-    {
-        val = g_WValues[ci].front();
+        slope = -10000;
+        xdiff = OP - g_OPValues[ci].front();
+        ybase = g_WValues[ci].front();
+        val = ybase + xdiff * slope;
     }
     else if (OP >= g_OPValues[ci].back())
     {
-        val = g_WValues[ci].back();
+        slope = 10000;
+        xdiff = OP - g_OPValues[ci].back();
+        ybase = g_WValues[ci].back();
+        val = ybase + xdiff * slope;
     }
     // Otherwise find interval, calculate slope, base index, etc.
     // Basic linear interpolation to obtain the weight value.
@@ -686,8 +596,7 @@ double weight_function(double OP, int ci)
         double xdiff = OP - xbase;
         val = ybase + xdiff * slope;
     }
-
-    return val;
+    return val + g_ChainWValues[ci];
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -737,20 +646,22 @@ bool check_weight_iter_flag()
 /// @param  OP_old        current order parameter
 /// @param  OP_new        order parameter of proposed configuration
 /// @param  chain_index   index of the current chain
+/// @param  chain_index   index of the proposed chain
 /// @return Boolean indicating whether the update was accepted (true) or
 ///         rejected (false).
 ////////////////////////////////////////////////////////////////////////////////
 bool accept_reject(const double OP_old,
                    const double OP_new,
-                   const int chain_index)
+                   const int chain_index_old,
+                   const int chain_index_new)
 {
     bool update;
     bool AR_iterate;
     // Only compute on node 0, broadcast to others
     if (hila::myrank() == 0)
     {
-        double W_new = weight_function(OP_new, chain_index);
-        double W_old = weight_function(OP_old, chain_index);
+        double W_new = weight_function(OP_new, chain_index_new);
+        double W_old = weight_function(OP_old, chain_index_old);
 
         // This happens when hard walls are active and OP_new
         // is out of bounds
@@ -789,8 +700,8 @@ bool accept_reject(const double OP_old,
     // Check if iteration is enabled
     if (AR_iterate)
     {
-        if (update) set_weight_iter_flag(iterate_weights(OP_new, chain_index));
-        else set_weight_iter_flag(iterate_weights(OP_old, chain_index));
+        if (update) set_weight_iter_flag(iterate_weights(OP_new, chain_index_old));
+        else set_weight_iter_flag(iterate_weights(OP_old, chain_index_old));
     }
 
     return update;
@@ -804,9 +715,10 @@ bool accept_reject(const double OP_old,
 ///          out of range, -1 is returned.
 ///
 /// @param OP   value of the order parameter
+/// @param ci   index of the current chain
 /// @return integer index for the vector g_N_OP_Bin
 ////////////////////////////////////////////////////////////////////////////////
-static int find_OP_bin_index(double OP, double ci)
+static int find_OP_bin_index(const double OP, const int ci)
 {
     // Return -1 when not in the interval
     if (OP <= g_OPBinLimits[ci].front())
@@ -830,6 +742,7 @@ static int find_OP_bin_index(double OP, double ci)
 /// @details
 ///
 /// @param OP   value of the order parameter
+/// @param ci   index of the current chain
 ////////////////////////////////////////////////////////////////////////////////
 static void bin_OP_value(const double OP, const int ci)
 {
@@ -899,93 +812,6 @@ static bool first_last_visited(int_vector &n)
 void set_direct_iteration_FC(bool (* fc_pointer)(int_vector &n))
 {
     finish_check = fc_pointer;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Following three functions related to "canonical" iteration are currently
-// not implemented properly.
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Computes an overcorrection of W given the visits ns (NOT FUNCTIONAL).
-/// @details Overcorrection checks which bins have been visited the most and
-///          modifies the weights in such a manner that the frequently visited
-///          bins are weighted (disproportionally) heavily. This should
-///          encourage the process to visit other bins during the next run of
-///          iterations.
-///
-/// @param Weight   vector containing the previously used weights
-/// @param n_sum    vector containing the total number of visits
-////////////////////////////////////////////////////////////////////////////////
-static void overcorrect(vector &Weight, int_vector &n_sum)
-{
-    int N = n_sum.size();
-    vector W(N, 0);
-    constexpr float C = 1;
-
-    for (int m = 0; m < N; ++m)
-    {
-        if (n_sum[m] > 0) W[m] = C * ::log(n_sum[m]);
-    }
-
-    // Redefine W[0] back to zero, set new weights
-    double base = W[0];
-    for (int i = 0; i < N; ++i)
-    {
-        Weight[i] += W[i] - base;
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Computes the next weight vector through iteration based on previous
-///        weights (NOT FUNCTIONAL).
-/// @details
-///
-/// @param Weight        vector containing the previously used weights
-/// @param n             vector containing the current number of visits
-/// @param g_sum         vector containing the previous local sums of n
-/// @param g_log_h_sum   vector containing the sum of previous logs of the
-///                      canonical weights
-////////////////////////////////////////////////////////////////////////////////
-static void recursive_weight_iteration(vector &Weight, int_vector &n,
-                                int_vector &g_sum, vector &g_log_h_sum)
-{
-    const int nmin = 10;
-    int N = n.size();
-
-    // Fill out log(h)
-    vector log_h(N);
-    for (int m = 0; m < N; ++m)
-    {
-        if (n[m] > 0)
-        {
-            log_h[m] = ::log(n[m]) + Weight[m];
-        }
-        // This is only going to get multiplied by zero,
-        // so the value doesn't matter.
-        else log_h[m] = 0;
-    }
-
-    // Compute the iteration. Note that W[0] is permanently kept to zero
-    vector W(N);
-    W[0] = 0;
-    Weight[0] = W[0];
-    for (int m = 1; m < N; ++m)
-    {
-        int gm;
-        // Check that both bins contain nmin hits before taking into account
-        if (n[m] > nmin and n[m - 1] > nmin)
-        {
-            gm = n[m] + n[m - 1];
-        }
-        else gm = 0;
-
-        g_sum[m]       += gm;
-        g_log_h_sum[m] += gm * (log_h[m] - log_h[m - 1]);
-
-        W[m] = W[m - 1] + g_log_h_sum[m] / g_sum[m];
-
-        // Modify the input weights to their new values
-        Weight[m] = W[m];
-    }
 }
 
 //////////////////////////////////////////////////////////////////////////////////
@@ -1129,33 +955,16 @@ static void recursive_weight_iteration(vector &Weight, int_vector &n,
 ////////////////////////////////////////////////////////////////////////////////
 static void initialise_weight_vectors()
 {
-    // If no input weight, set up equidistant bins
-    if (g_WParam.weight_loc.compare("NONE") == 0)
+    std::vector<int_vector> GNOB;
+    for (int i = 0; i < g_ChainWValues.size(); i++)
     {
-        //int N = g_WParam.bin_number;
-        //g_WValues        = vector(N, 0.0);
-        //g_OPValues       = vector(N, 0.0);
-        //g_OPBinLimits    = vector(N + 1, 0.0);
-
-        ////setup_equidistant_bins();
-
-        //g_N_OP_Bin       = int_vector(N, 0);
-        //g_N_OP_BinTotal  = int_vector(N, 0);
+        int N = g_WValues[i].size();
+        GNOB.push_back(int_vector(N, 0));
     }
-    // Same for predetermined bins. g_OPValues, g_WValues
-    // and g_OP_BinLimits have been read from the input file.
-    // To prevent any accidents with the iterators, these bin vectors
-    // are initialised in all cases. Should really not affect performance.
-    else
-    {
-        for (int i = 0; i < g_ChainWValues.size(); i++)
-        {
-            int N = g_WValues[i].size();
-            g_N_OP_Bin.push_back(int_vector(N, 0));
-            g_N_OP_BinTotal.push_back(int_vector(N, 0));
-        }
-            
-    }
+    GNOB.push_back(int_vector(g_ChainWValues.size(), 0));
+
+    g_N_OP_Bin      = GNOB;
+    g_N_OP_BinTotal = GNOB;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1185,7 +994,7 @@ static bool iterate_weight_function_direct(const double OP, const int ci)
                 g_N_OP_BinTotal[ci][m] += g_N_OP_Bin[ci][m];
             }
 
-            if (g_WParam.visuals) print_iteration_histogram();
+            if (g_WParam.visuals) print_iteration_histogram(ci);
 
             double base = *std::min_element(g_WValues[ci].begin(), g_WValues[ci].end());
             for (int m = 0; m < N; ++m)
@@ -1233,51 +1042,52 @@ static bool iterate_weight_function_direct(const double OP, const int ci)
 ///          g_WParam.DIP.single_check_interval to prevent excessive checking
 ///          for the visits.
 ///
-/// @param  OP            order parameter of the current configuration
-///                       (user supplied)
-/// @param  chain_index   current chain index (user supplied)
+/// @param  OP   order parameter of the current configuration
+///              (user supplied)
+/// @param  ci   current chain index (user supplied)
 /// @return boolean indicating whether the iteration is considered complete
 ////////////////////////////////////////////////////////////////////////////////
 static bool iterate_weight_function_direct_single(const double OP,
-                                                  const int chain_index)
+                                                  const int ci)
 {
     int continue_iteration;
     if (hila::myrank() == 0)
     {
         int samples = g_WParam.DIP.sample_size;
-        int N       = g_WValues.size();
+        int N       = g_WValues[ci].size();
 
-        int bin_index = find_OP_bin_index(OP, chain_index);
+        int bin_index = find_OP_bin_index(OP, ci);
+        //hila::out0 << OP << "  " << bin_index  << " chain " << ci << "\n";
         // Only increment if on the min-max interval
         if (bin_index != -1)
-            g_N_OP_BinTotal[bin_index] += 1;
+            g_N_OP_BinTotal[ci][bin_index] += 1;
 
         g_WeightIterationCount += 1;
-        g_WValues[bin_index] += g_WParam.DIP.C;
+        g_WValues[ci][bin_index] += g_WParam.DIP.C;
 
         continue_iteration = true;
 
         if (g_WeightIterationCount % g_WParam.DIP.single_check_interval == 0)
         {
 
-        double base = *std::min_element(g_WValues.begin(), g_WValues.end());
+        double base = *std::min_element(g_WValues[ci].begin(), g_WValues[ci].end());
         for (int m = 0; m < N; ++m)
         {
             // Always set minimum weight to zero. This is inconsequential
             // as only the differences matter.
-            g_WValues[m] -= base;
-            g_N_OP_Bin[m] = 0;
+            g_WValues[ci][m] -= base;
+            g_N_OP_Bin[ci][m] = 0;
         }
 
         // Visuals
-        if (g_WParam.visuals) print_iteration_histogram();
+        if (g_WParam.visuals) print_iteration_histogram(ci);
 
         // If condition satisfied, zero the totals and decrease C
-        if (finish_check(g_N_OP_BinTotal))
+        if (finish_check(g_N_OP_BinTotal[ci]))
         {
             for (int m = 0; m < N; m++)
             {
-                g_N_OP_BinTotal[m] = 0;
+                g_N_OP_BinTotal[ci][m] = 0;
             }
 
             g_WParam.DIP.C /= 1.5;
@@ -1292,7 +1102,7 @@ static bool iterate_weight_function_direct_single(const double OP,
             continue_iteration = false;
         }
 
-        write_weight_function("intermediate_weight.dat");
+        //write_weight_function("intermediate_weight.dat");
         hila::out0 << "Update size C = " << g_WParam.DIP.C << "\n\n";
         }
     }
@@ -1301,19 +1111,96 @@ static bool iterate_weight_function_direct_single(const double OP,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+/// @brief Same as iterate_weight_function_direct for sample size 1.
+/// @details In this special case the weights are modified after each new
+///          value of the order parameter. Reduced internal complexity due to
+///          this simplification.
+///          Whether all bins have been visited is now checked only every
+///          g_WParam.DIP.single_check_interval to prevent excessive checking
+///          for the visits.
+///
+/// @param  OP   order parameter of the current configuration
+///              (user supplied)
+/// @param  ci   current chain index (user supplied)
+/// @return boolean indicating whether the iteration is considered complete
+////////////////////////////////////////////////////////////////////////////////
+static bool iterate_chains_direct_single(const double OP, const int ci)
+{
+    int continue_iteration;
+    if (hila::myrank() == 0)
+    {
+        int N = g_ChainWValues.size();
+        g_WeightIterationCount += 1;
+        g_ChainWValues[ci] += g_WParam.DIP.C;
+
+        g_N_OP_BinTotal[N][ci] += 1;
+        continue_iteration = true;
+
+        if (g_WeightIterationCount % g_WParam.DIP.single_check_interval == 0)
+        {
+            double base = *std::min_element(g_ChainWValues.begin(),
+                                            g_ChainWValues.end());
+            for (int m = 0; m < N; ++m)
+            {
+                // Always set minimum weight to zero. This is inconsequential
+                // as only the differences matter.
+                g_ChainWValues[m] -= base;
+                g_N_OP_Bin[N][m] = 0;
+            }
+            
+            for (int m = 0; m < N; ++m)
+            {
+                printf("%f\t", g_ChainWValues[m]);
+            }
+
+            for (int m = 0; m < N; ++m)
+            {
+                printf("%d\t", g_N_OP_BinTotal[N][m]);
+            }
+            printf("\n");
+
+            // If condition satisfied, zero the totals and decrease C
+            if (finish_check(g_N_OP_BinTotal[N]))
+            {
+                for (int m = 0; m < N; m++)
+                {
+                    g_N_OP_BinTotal[N][m] = 0;
+                }
+
+                g_WParam.DIP.C /= 1.5;
+                hila::out0 << "Decreasing update size...\n";
+                hila::out0 << "New update size C = " << g_WParam.DIP.C << "\n\n";
+            }
+
+            if (g_WParam.DIP.C < g_WParam.DIP.C_min)
+            {
+                hila::out0 << "Reached minimum update size.\n";
+                hila::out0 << "Weight iteration complete.\n";
+                continue_iteration = false;
+            }
+
+            write_weight_function("intermediate_weight.dat");
+            hila::out0 << "Update size C = " << g_WParam.DIP.C << "\n\n";
+        }
+    }
+    hila::broadcast(continue_iteration);
+    return continue_iteration;
+}
+////////////////////////////////////////////////////////////////////////////////
 /// @brief Prints out a crude horisontal histogram.
 /// @details Procures a crude horisontal ASCII histogram based on the g_N_OP_Bin
 ///          vector. The histogram bin heights are proportional to g_N_OP_Bin
 ///          values. This is not very expressive for large N, as it won't fit
 ///          the height of the screen.
 ////////////////////////////////////////////////////////////////////////////////
-static void print_iteration_histogram()
+static void print_iteration_histogram(const int ci)
 {
     int samples = g_WParam.DIP.sample_size;
-    int N       = g_WValues.size();
+    int N       = g_WValues[ci].size();
     // Find maximum bin content for normalisation
-    int nmax    = *std::max_element(g_N_OP_Bin.begin(), g_N_OP_Bin.end());
+    int nmax    = *std::max_element(g_N_OP_Bin[ci].begin(), g_N_OP_Bin[ci].end());
     // Write a column header
+    hila::out0 << "Chain " << ci << "\n"; 
     printf("Order Parameter     Weight 	         Number of hits\n");
 
     for (int m = 0; m < N; ++m)
@@ -1322,13 +1209,13 @@ static void print_iteration_histogram()
         // hits to each bin and print it out along with relevant numerical
         // values
         std::string n_sum_hist = "";
-        if (g_N_OP_BinTotal[m] > 0) n_sum_hist += "O";
-        for (int i = 0; i < int(g_N_OP_Bin[m] * 200.0 / samples); i++)
+        if (g_N_OP_BinTotal[ci][m] > 0) n_sum_hist += "O";
+        for (int i = 0; i < int(g_N_OP_Bin[ci][m] * 200.0 / samples); i++)
         {
             n_sum_hist += "|";
         }
-        printf("%-20.7f%-20.7f%d\t\t\t%s\n", g_OPValues[m],
-                g_WValues[m], g_N_OP_Bin[m], n_sum_hist.c_str());
+        printf("%-20.7f%-20.7f%d\t\t\t%s\n", g_OPValues[ci][m],
+                g_WValues[ci][m], g_N_OP_Bin[ci][m], n_sum_hist.c_str());
     }
 }
 
@@ -1351,16 +1238,19 @@ static void setup_iteration()
         if (g_WParam.DIP.sample_size > 1)
         {
             iterate_weights = &iterate_weight_function_direct;
+            iterate_chains = &iterate_chains_direct_single;
         }
         else
         {
             iterate_weights = &iterate_weight_function_direct_single;
+            iterate_chains = &iterate_chains_direct_single;
         }
         g_WParam.DIP.C = g_WParam.DIP.C_init;
     }
     else
     {
         iterate_weights = &iterate_weight_function_direct;
+        iterate_chains = &iterate_chains_direct_single;
         g_WParam.DIP.C = g_WParam.DIP.C_init;
     }
 
@@ -1425,7 +1315,7 @@ void initialise(const string wfile_name)
         // Read pre-existing weight if given
         if (g_WParam.weight_loc.compare("NONE") != 0)
         {
-            read_bins_weights(g_WParam.weight_loc);
+            read_weight_function(g_WParam.weight_loc);
         }
 
         // Initialise rest of the uninitialised vectors
@@ -1466,6 +1356,51 @@ void muca_max_OP(double &value, bool modify)
     }
     else
         value = g_WParam.max_OP;
+}
+
+void set_weight_iter_add(double C)
+{
+    g_WParam.DIP.C = C;
+}
+
+void set_weight_bin_edges(std::vector<std::vector<double>> edges)
+{
+    g_OPBinLimits = edges;
+    std::vector<vector> new_centres;
+    for (int i = 0; i < g_OPBinLimits.size(); i++)
+    {
+        vector nc;
+        for (int j = 0; j < g_OPBinLimits[i].size() - 1; j++)
+        {
+            double cent = g_OPBinLimits[i][j + 1];
+            cent += g_OPBinLimits[i][j];
+            cent /= 2.0;
+
+            nc.push_back(cent);
+        }
+        new_centres.push_back(nc);
+    }
+    g_OPValues = new_centres;
+    hila::out0 << g_OPValues.size() << "\n";
+    for (int i = 0; i < g_OPValues.size(); i++)
+        hila::out0 << g_OPValues[i][2] << " ";
+}
+
+void set_weights(std::vector<std::vector<double>> weights)
+{
+    g_WValues = weights;
+    initialise_weight_vectors();
+}
+
+void set_chain_weights(std::vector<double> chain_weights)
+{
+    g_ChainWValues = chain_weights;
+    initialise_weight_vectors();
+}
+
+void add_to_chain(int chain_index, double C)
+{
+    g_ChainWValues[chain_index] += 1;
 }
 
 }
