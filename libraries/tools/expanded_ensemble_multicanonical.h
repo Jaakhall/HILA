@@ -40,7 +40,7 @@ void read_weight_parameters(std::string parameter_file_name);
 void read_weight_function(std::string W_function_filename);
 
 // Writes weight functions to a file
-void write_weight_function(std::string filename);
+void write_weight_function(std::string filename, std::string header = "");
 
 // Gives the weight as a function of the order parameter
 double weight(const double OP, const int chain_index);
@@ -60,7 +60,7 @@ void set_continuous_iteration(bool YN);
 bool check_weight_iter_flag();
 void set_weight_iter_flag(bool YN);
 
-void set_weight_iter_add(double C);
+void weight_iter_add(double &C, bool modify = true);
 void add_to_chain(int chain_index, double C);
 
 void set_weight_bin_edges(std::vector<std::vector<double>> edges);

@@ -323,6 +323,14 @@ void read_weight_function(string W_function_filename)
         //printf("Weight function has %d chains.\n", N_chains);
         printf("Reading the weight function into the program.\n");
 
+        // Reset current vectors
+        std::vector<std::vector<double>> empty_vec_vec(0);
+        std::vector<double> empty_vec(0);
+        g_OPBinLimits  = empty_vec_vec;
+        g_OPValues     = empty_vec_vec;
+        g_WValues      = empty_vec_vec;
+        g_ChainWValues = empty_vec;
+
         // Assume first row constains chain weights
         // and the following pairs the bin limits and weights respectively
         if (W_file.is_open())
@@ -381,81 +389,83 @@ void read_weight_function(string W_function_filename)
         }
         W_file.close();
     }
-    // Check afterwards that the lengths are consistent
-    int N_BLvec = g_OPBinLimits.size();
-    int N_WLvec = g_WValues.size();
-    //hila::out0 << N_WLvec << " " << N_BLvec << "\n";
-    //for (int i = 0; i < N_chains; i++) hila::out0 << g_WValues[i].size() << " " << g_OPBinLimits[i].size() << " ";
-    if (N_chains != N_BLvec)
-    {
-        hila::out0 << "There are " << N_chains << " chains, but "
-                   << N_BLvec << " sets of bin limits!\n";
-        hila::out0 << "Check input file formatting. Terminating.\n";
-        hila::finishrun();
-    }
-    if (N_chains != N_WLvec)
-    {
-        hila::out0 << "There are " << N_chains << " chains, but "
-                   << N_WLvec << " sets of weights!\n";
-        hila::out0 << "Check input file formatting. Terminating.\n";
-        hila::finishrun();
-    }
-
     bool terminate = false;
-    for (int i = 0; i < N_chains; i++)
+    if (hila::myrank() == 0)
     {
-        int NBL = g_OPBinLimits[i].size();
-        int NWL = g_WValues[i].size();
-        if (NBL != NWL + 1)
+        // Check afterwards that the lengths are consistent
+        int N_BLvec = g_OPBinLimits.size();
+        int N_WLvec = g_WValues.size();
+        if (N_chains != N_BLvec)
         {
-            terminate = true;
-            hila::out0 << "Weights and bins for chain " << i
-                       << " are inconsistent.\n";
-            hila::out0 << "There are " << NBL << " bin edges, and " << NWL
-                       << " weights!\n";
+            hila::out0 << "There are " << N_chains << " chains, but "
+                       << N_BLvec << " sets of bin limits!\n";
             hila::out0 << "Check input file formatting. Terminating.\n";
-            hila::finishrun();
+            terminate = true;
         }
-    }
-
-    // Check that the bin edges form an increasing sequence
-    for (int i = 0; i < N_chains; i++)
-    {
-        double prev = g_OPBinLimits[i][0];
-        for (int j = 1; j < g_OPBinLimits[i].size(); j++)
+        if (N_chains != N_WLvec)
         {
-            if (g_OPBinLimits[i][j] <= prev)
+            hila::out0 << "There are " << N_chains << " chains, but "
+                       << N_WLvec << " sets of weights!\n";
+            hila::out0 << "Check input file formatting. Terminating.\n";
+            terminate = true;
+        }
+
+        for (int i = 0; i < N_chains; i++)
+        {
+            int NBL = g_OPBinLimits[i].size();
+            int NWL = g_WValues[i].size();
+            if (NBL != NWL + 1)
             {
-                hila::out0 << "The bin limits for chain " << i
-                           << " do not form an increasing sequence!\n"
-                           << "Edge " << j << " is less than or equal to "
-                           << "edge " << j - 1 << "\n"
-                           << "Check provided bin edges.\n";
+                hila::out0 << "Weights and bins for chain " << i
+                           << " are inconsistent.\n";
+                hila::out0 << "There are " << NBL << " bin edges, and " << NWL
+                           << " weights!\n";
+                hila::out0 << "Check input file formatting. Terminating.\n";
                 terminate = true;
             }
-            prev = g_OPBinLimits[i][j];
+        }
+
+        // Check that the bin edges form an increasing sequence
+        for (int i = 0; i < N_chains; i++)
+        {
+            double prev = g_OPBinLimits[i][0];
+            for (int j = 1; j < g_OPBinLimits[i].size(); j++)
+            {
+                if (g_OPBinLimits[i][j] <= prev)
+                {
+                    hila::out0 << "The bin limits for chain " << i
+                               << " do not form an increasing sequence!\n"
+                               << "Edge " << j << " is less than or equal to "
+                               << "edge " << j - 1 << "\n"
+                               << "Check provided bin edges.\n";
+                    terminate = true;
+                }
+                prev = g_OPBinLimits[i][j];
+            }
         }
     }
+    hila::broadcast(terminate);
     if (terminate)
     {
         hila::out0 << "Check input file formatting. Terminating.\n";
         hila::finishrun();
     }
 
-    for (int i = 0; i < N_chains; i++)
-    {
-        for (int j = 0; j < g_OPBinLimits[i].size(); j++)
-        {
-            printf("%e\t", g_OPBinLimits[i][j]);
-        }
-        printf("\n");
-        for (int j = 0; j < g_WValues[i].size(); j++)
-        {
-            printf("%e\t", g_WValues[i][j]);
-        }
-        printf("\n");
-    }
-
+    // Prints the bin limits and weights.
+    //for (int i = 0; i < N_chains; i++)
+    //{
+    //    for (int j = 0; j < g_OPBinLimits[i].size(); j++)
+    //    {
+    //        printf("%e\n", g_OPBinLimits[i][j]);
+    //    }
+    //    printf("\n");
+    //    for (int j = 0; j < g_WValues[i].size(); j++)
+    //    {
+    //        printf("%e\n", g_WValues[i][j]);
+    //    }
+    //    printf("Chain weight = %e\n", g_ChainWValues[i]);
+    //    printf("\n");
+    //}
 
     hila::out0 << "\nSuccesfully loaded the user provided weight function.\n";
 }
@@ -471,7 +481,7 @@ void read_weight_function(string W_function_filename)
 /// @param W_function_filename
 /// @param g_WParam                    struct of weight iteration parameters
 ////////////////////////////////////////////////////////////////////////////////
-void write_weight_function(string W_function_filename)
+void write_weight_function(string W_function_filename, std::string header)
 {
     if (hila::myrank() == 0)
     {
@@ -479,7 +489,9 @@ void write_weight_function(string W_function_filename)
         //string filename = generate_outfile_name(RP);
         printf("Writing the current weight function into a file...\n");
         W_file.open(W_function_filename.c_str());
-        //write_weight_file_header(W_file, FP, RP, g_WParam);
+
+        // Append a user defined header
+        W_file << header;
 
         // Start with the chain weights
         to_file(W_file, "BEGIN_DATA\n", 0);
@@ -571,6 +583,7 @@ static double weight_function(const double OP, const int ci)
         xdiff = OP - g_OPValues[ci].front();
         ybase = g_WValues[ci].front();
         val = ybase + xdiff * slope;
+        //val = std::numeric_limits<double>::infinity();
     }
     else if (OP >= g_OPValues[ci].back())
     {
@@ -578,6 +591,7 @@ static double weight_function(const double OP, const int ci)
         xdiff = OP - g_OPValues[ci].back();
         ybase = g_WValues[ci].back();
         val = ybase + xdiff * slope;
+        //val = std::numeric_limits<double>::infinity();
     }
     // Otherwise find interval, calculate slope, base index, etc.
     // Basic linear interpolation to obtain the weight value.
@@ -1152,6 +1166,7 @@ static bool iterate_chains_direct_single(const double OP, const int ci)
             {
                 printf("%f\t", g_ChainWValues[m]);
             }
+            printf("\n");
 
             for (int m = 0; m < N; ++m)
             {
@@ -1316,7 +1331,7 @@ void initialise(const string wfile_name)
         if (g_WParam.weight_loc.compare("NONE") != 0)
         {
             read_weight_function(g_WParam.weight_loc);
-        }
+	}
 
         // Initialise rest of the uninitialised vectors
         initialise_weight_vectors();
@@ -1339,7 +1354,10 @@ void muca_min_OP(double &value, bool modify)
         hila::out0 << "min_OP set to new value " << g_WParam.min_OP << "\n";
     }
     else
-        value = g_WParam.min_OP;
+    {
+	value = g_WParam.min_OP;
+	hila::broadcast(value);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1355,12 +1373,21 @@ void muca_max_OP(double &value, bool modify)
         hila::out0 << "max_OP set to new value " << g_WParam.max_OP << "\n";
     }
     else
+    {
         value = g_WParam.max_OP;
+	hila::broadcast(value);
+    }
 }
 
-void set_weight_iter_add(double C)
+void weight_iter_add(double &C, bool modify)
 {
-    g_WParam.DIP.C = C;
+    if (modify)
+        g_WParam.DIP.C = C;
+    else
+    {
+        C = g_WParam.DIP.C;
+	hila::broadcast(C);
+    }
 }
 
 void set_weight_bin_edges(std::vector<std::vector<double>> edges)
@@ -1381,9 +1408,9 @@ void set_weight_bin_edges(std::vector<std::vector<double>> edges)
         new_centres.push_back(nc);
     }
     g_OPValues = new_centres;
-    hila::out0 << g_OPValues.size() << "\n";
-    for (int i = 0; i < g_OPValues.size(); i++)
-        hila::out0 << g_OPValues[i][2] << " ";
+    //hila::out0 << g_OPValues.size() << "\n";
+    //for (int i = 0; i < g_OPValues.size(); i++)
+    //    hila::out0 << g_OPValues[i][2] << " ";
 }
 
 void set_weights(std::vector<std::vector<double>> weights)
@@ -1400,7 +1427,7 @@ void set_chain_weights(std::vector<double> chain_weights)
 
 void add_to_chain(int chain_index, double C)
 {
-    g_ChainWValues[chain_index] += 1;
+    g_ChainWValues[chain_index] += C;
 }
 
 }
