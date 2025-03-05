@@ -19,7 +19,19 @@ struct parameters {
     int n_profile;
     std::string config_file;
     double time_offset;
+    poly_limit polyakov_pot;
+    double poly_min, poly_max, poly_m2;
+    std::vector<int> n_smear;
+    double smear_coeff;
+    std::vector<int> z_smear;
+    int n_surface;
+    int n_dump_polyakov;
     int twist_coeff;
+    int muca_action;
+    int muca_poly;
+    int muca_updates;
+    int measure_surface;
+    std::string out_folder;
 };
 
 #endif

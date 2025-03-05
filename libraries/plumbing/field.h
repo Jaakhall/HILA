@@ -278,7 +278,8 @@ class Field {
 
         // put here some implementation checks for field vars
 #ifdef VECTORIZED
-        static_assert(sizeof(hila::arithmetic_type<T>) == 4 || sizeof(hila::arithmetic_type<T>) == 8,
+        static_assert(sizeof(hila::arithmetic_type<T>) == 4 ||
+                          sizeof(hila::arithmetic_type<T>) == 8,
                       "In vectorized arch (e.g. AVX2), only 4 or 8 byte (32 or 64 bit) numbers for "
                       "Field<> implemented, sorry!");
 #endif
@@ -753,6 +754,24 @@ class Field {
      */
     Field<T> &operator=(const Field<T> &rhs) {
         (*this)[ALL] = rhs[X];
+
+        // // This is direct memcpy version of the routine, slightly faster on cpus
+        //         if (this->fs == rhs.fs)
+        //             return *this;
+        //
+        //         assert(this->fs->lattice_id == rhs.fs->lattice_id &&
+        //                "Cannot assign fields which belong to different lattices!");
+        //
+        // #if !defined(CUDA) && !defined(HIP)
+        //         memcpy(this->field_buffer(), rhs.field_buffer(), sizeof(T) *
+        //         lattice.mynode.volume());
+        // #else
+        //         gpuMemcpy(this->field_buffer(), rhs.field_buffer(), sizeof(T) *
+        //         lattice.mynode.volume(),
+        //                   gpuMemcpyDeviceToDevice);
+        // #endif
+        //         this->mark_changed(ALL);
+
         return *this;
     }
 
@@ -1033,7 +1052,7 @@ class Field {
     /**
      * @brief Field comparison operator.
      * @details Fields are equal if their content is element-by-element equal
-     * 
+     *
      * @param rhs Field to compare Field with
      * @return true
      * @return false
@@ -1141,7 +1160,6 @@ class Field {
     void wait_gather(Direction d, Parity p) const;
     void gather(Direction d, Parity p = ALL) const;
     void drop_comms(Direction d, Parity p) const;
-    void cancel_comm(Direction d, Parity p) const;
 
     /**
      * @brief Create a periodically shifted copy of the field
@@ -1725,21 +1743,11 @@ auto operator/(Field<A> lhs, const B &rhs) {
     return lhs;
 }
 
-/**
- * @brief std:swap() for Fields
- */
-namespace std {
-template <typename T>
-void swap(Field<T> &A, Field<T> &B) {
-    std::swap(A.fs, B.fs);
-}
-} // namespace std
-
 namespace hila {
-  
+
 /**
  * @brief Implement hila::swap() for Fields too, equivalent to std::swap()
- */  
+ */
 template <typename T>
 void swap(Field<T> &A, Field<T> &B) {
     std::swap(A.fs, B.fs);
@@ -1894,39 +1902,41 @@ Field<T> Field<T>::shift(const CoordinateVector &v) const {
 
 
 ///  @internal
-///  drop_comms():  if field is changed or deleted,
-///  cancel ongoing communications.  This should happen very seldom,
-///  only if there are "by-hand" start_gather operations and these are not needed
+///  drop_comms(): if field is changed or deleted, 'cancel' ongoing communications. Now just wait
+///  for the communications to finish don't actually cancel them. Still separate this from using
+///  only wait_gather since this needs to be called in ~Field() and we need to check if there are
+///  ongoing communications. User gets nottified if there was redundant communications if
+///  drop_comms_timer is in the run print out.
+///
+///  This should happen very seldom, only if there are "by-hand" start_gather operations and these
+///  are not needed.
 template <typename T>
 void Field<T>::drop_comms(Direction d, Parity p) const {
 
-    if (is_comm_initialized()) {
-        if (is_gather_started(d, ALL))
-            cancel_comm(d, ALL);
-        if (p != ALL) {
-            if (is_gather_started(d, p))
-                cancel_comm(d, p);
-        } else {
-            if (is_gather_started(d, EVEN))
-                cancel_comm(d, EVEN);
-            if (is_gather_started(d, ODD))
-                cancel_comm(d, ODD);
+    if (hila::is_comm_initialized()) {
+        if (is_gather_started(d, ALL)) {
+            drop_comms_timer.start();
+            wait_gather(d, ALL);
+            drop_comms_timer.stop();
         }
-    }
-}
-
-/// @internal cancel ongoing send and receive
-template <typename T>
-void Field<T>::cancel_comm(Direction d, Parity p) const {
-    if (lattice.nn_comminfo[d].from_node.rank != hila::myrank()) {
-        cancel_receive_timer.start();
-        MPI_Cancel(&fs->receive_request[(int)p - 1][d]);
-        cancel_receive_timer.stop();
-    }
-    if (lattice.nn_comminfo[d].to_node.rank != hila::myrank()) {
-        cancel_send_timer.start();
-        MPI_Cancel(&fs->send_request[(int)p - 1][d]);
-        cancel_send_timer.stop();
+        if (p != ALL) {
+            if (is_gather_started(d, p)) {
+                drop_comms_timer.start();
+                wait_gather(d, p);
+                drop_comms_timer.stop();
+            }
+        } else {
+            if (is_gather_started(d, EVEN)) {
+                drop_comms_timer.start();
+                wait_gather(d, EVEN);
+                drop_comms_timer.stop();
+            }
+            if (is_gather_started(d, ODD)) {
+                drop_comms_timer.start();
+                wait_gather(d, ODD);
+                drop_comms_timer.stop();
+            }
+        }
     }
 }
 

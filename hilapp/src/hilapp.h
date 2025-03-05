@@ -62,8 +62,6 @@ extern llvm::cl::opt<bool> dump_ast;
 extern llvm::cl::opt<bool> no_include;
 extern llvm::cl::opt<std::string> dummy_def;
 extern llvm::cl::opt<std::string> dummy_incl;
-extern llvm::cl::opt<bool> function_spec_no_inline;
-extern llvm::cl::opt<bool> method_spec_no_inline;
 extern llvm::cl::opt<bool> funcinfo;
 extern llvm::cl::opt<bool> no_output;
 extern llvm::cl::opt<bool> syntax_only;
@@ -114,6 +112,9 @@ struct global_state {
     //  std::vector<const TemplateParameterList *> class_templ_params = {};
     //  std::vector<const TemplateArgumentList *> class_templ_args = {};
     FunctionDecl *currentFunctionDecl = nullptr;
+    int namespace_level = 0;
+    SourceRange namespace_range;
+
     /// Describes a code location
     struct location_struct {
         SourceLocation function;

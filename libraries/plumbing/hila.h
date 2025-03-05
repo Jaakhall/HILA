@@ -13,6 +13,7 @@
 #include "datatypes/u1.h"
 #include "datatypes/su2.h"
 
+#include "plumbing/globals.h"
 #include "plumbing/coordinates.h"
 #include "plumbing/lattice.h"
 #include "plumbing/site_index.h"
@@ -21,6 +22,10 @@
 #include "plumbing/reduction.h"
 #include "plumbing/reductionvector.h"
 #include "plumbing/site_select.h"
+
+#if __has_include("hila_signatures.h")
+#include "hila_signatures.h"
+#endif
 
 //#if defined(CUDA) || defined(HIP)
 //#include "plumbing/backend_gpu/gpu_reduction.h"
@@ -38,5 +43,7 @@
 #endif
 
 #include "plumbing/random.h"
+
+#include "plumbing/shuffle.h"
 
 #endif

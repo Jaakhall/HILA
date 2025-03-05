@@ -32,25 +32,36 @@ void field_storage<T>::free_field() {
 template <typename T>
 __device__ inline auto field_storage<T>::get(const unsigned i,
                                              const unsigned field_alloc_size) const {
-    assert(i < field_alloc_size);
+    // assert(i < field_alloc_size);
     using base_t = hila::arithmetic_type<T>;
     constexpr unsigned n_elements = sizeof(T) / sizeof(base_t);
-    T value;
-    base_t *value_f = (base_t *)&value;
-    base_t *fp = (base_t *)(fieldbuf);
+    union {
+        T value;
+        base_t arr[n_elements];
+    } u;
+    const base_t *fp = (base_t *)(fieldbuf);
     for (unsigned e = 0; e < n_elements; e++) {
-        value_f[e] = fp[e * field_alloc_size + i];
+         u.arr[e] = fp[e * field_alloc_size + i];
     }
-    return value;
+    return u.value;
+
+    // T value;
+    // base_t *value_f = (base_t *)&value;
+    // base_t *fp = (base_t *)(fieldbuf);
+    // for (unsigned e = 0; e < n_elements; e++) {
+    //     value_f[e] = fp[e * field_alloc_size + i];
+    // }
+    // return value;
 }
 
 template <typename T>
 // template <typename A>
 __device__ inline void field_storage<T>::set(const T &value, const unsigned i,
                                              const unsigned field_alloc_size) {
-    assert(i < field_alloc_size);
+    // assert(i < field_alloc_size);
     using base_t = hila::arithmetic_type<T>;
     constexpr unsigned n_elements = sizeof(T) / sizeof(base_t);
+
     const base_t *value_f = (base_t *)&value;
     base_t *fp = (base_t *)(fieldbuf);
     for (unsigned e = 0; e < n_elements; e++) {
@@ -89,20 +100,31 @@ __global__ void set_element_kernel(field_storage<T> field, T value, unsigned i,
 }
 
 template <typename T>
+__global__ void set_element_kernel_ptr(field_storage<T> field, const T *buf, unsigned i,
+                                       const unsigned field_alloc_size) {
+    field.set(*buf, i, field_alloc_size);
+}
+
+
+template <typename T>
 template <typename A>
 void field_storage<T>::set_element(A &value, const unsigned i, const lattice_struct &lattice) {
-    char *d_buffer;
     T t_value = value;
 
-    // Allocate space and copy the buffer to the device
-    //   gpuMalloc(&(d_buffer), sizeof(T));
-    //   gpuMemcpy(d_buffer, (char *)&t_value, sizeof(T), gpuMemcpyHostToDevice);
+    if constexpr (sizeof(T) <= GPU_GLOBAL_ARG_MAX_SIZE) {
+        // pass element directly as arg
+        set_element_kernel<<<1, 1>>>(*this, t_value, i, lattice.field_alloc_size());
+    } else {
+        // This branch is used for large variables:
+        // allocate space and copy the buffer to the device
+        T *d_buffer;
+        gpuMalloc(&(d_buffer), sizeof(T));
+        gpuMemcpy(d_buffer, (char *)&t_value, sizeof(T), gpuMemcpyHostToDevice);
 
-    // call the kernel to set correct indexes
-    //   set_element_kernel<<<1, 1>>>(*this, d_buffer, i, lattice.field_alloc_size());
-    //   gpuFree(d_buffer);
-
-    set_element_kernel<<<1, 1>>>(*this, t_value, i, lattice.field_alloc_size());
+        // call the kernel to set correct indexes
+        set_element_kernel_ptr<<<1, 1>>>(*this, d_buffer, i, lattice.field_alloc_size());
+        gpuFree(d_buffer);
+    }
 }
 
 /// A kernel that gathers elements
@@ -138,6 +160,8 @@ void field_storage<T>::gather_elements(T *RESTRICT buffer, const unsigned *RESTR
     gpuFree(d_site_index);
     gpuFree(d_buffer);
 }
+
+#ifdef SPECIAL_BOUNDARY_CONDITIONS
 
 /// A kernel that gathers elements negated
 // requires unary -
@@ -182,6 +206,8 @@ void field_storage<T>::gather_elements_negated(T *RESTRICT buffer,
         gpuFree(d_buffer);
     }
 }
+
+#endif
 
 template <typename T>
 __global__ void gather_comm_elements_kernel(field_storage<T> field, T *buffer, unsigned *site_index,
@@ -264,6 +290,7 @@ void field_storage<T>::gather_comm_elements(T *buffer,
 
     // Call the kernel to build the list of elements
     int N_blocks = n / N_threads + 1;
+#ifdef SPECIAL_BOUNDARY_CONDITIONS    
     if (antiperiodic) {
 
         if constexpr (hila::has_unary_minus<T>::value) {
@@ -275,6 +302,10 @@ void field_storage<T>::gather_comm_elements(T *buffer,
         gather_comm_elements_kernel<<<N_blocks, N_threads>>>(*this, d_buffer, d_site_index, n,
                                                              lattice.field_alloc_size());
     }
+#else
+    gather_comm_elements_kernel<<<N_blocks, N_threads>>>(*this, d_buffer, d_site_index, n,
+                                                         lattice.field_alloc_size());
+#endif    
 
 #ifndef GPU_AWARE_MPI
     // Copy the result to the host

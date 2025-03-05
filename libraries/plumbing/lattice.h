@@ -227,6 +227,13 @@ class lattice_struct {
     void setup_layout();
     void setup_nodes();
 
+    /// is the lattice initialized
+    bool is_initialized() const {
+        // using l_volume as the flag
+        return l_volume != 0;
+    }
+
+
     // Std accessors:
     // volume
     int64_t volume() const {
@@ -398,14 +405,6 @@ extern lattice_struct lattice;
 // Keep track of defined lattices
 extern std::vector<lattice_struct *> lattices;
 
-
-#if defined(CUDA) || defined(HIP)
-__device__ __host__ int loop_lattice_size(Direction d);
-#else
-inline int loop_lattice_size(Direction d) {
-    return lattice.size(d);
-}
-#endif
 
 
 #ifdef VANILLA

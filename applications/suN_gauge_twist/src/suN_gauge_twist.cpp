@@ -1,25 +1,31 @@
 #include "gauge/staples.h"
+#include "gauge/polyakov.h"
 #include "gauge/stout_smear.h"
 #include "gauge/sun_heatbath.h"
 #include "gauge/sun_overrelax.h"
 #include "hila.h"
+#include "multicanonical.h"
+
 //#include "gauge/polyakov.h"
 
 #include <fftw3.h>
 #include <numeric>
+#include <stdio.h>
+#include <stdlib.h>
 
 // local includes
 #include "checkpoint.h"
 #include "parameters.h"
+#include "polyakov_surface.h"
 #include "twist_specific_methods.h"
-
-/**
- * @brief Helper function to get valid z-coordinate index
- *
- * @param z
- * @return int
- */
-int z_ind(int z) { return (z + lattice.size(e_z)) % lattice.size(e_z); }
+#include "utility.h"
+// /**
+//  * @brief Helper function to get valid z-coordinate index
+//  *
+//  * @param z
+//  * @return int
+//  */
+// int z_ind(int z) { return (z + lattice.size(e_z)) % lattice.size(e_z); }
 
 /**
  * @brief Measures Polyakov lines and Wilson action
@@ -31,44 +37,56 @@ int z_ind(int z) { return (z + lattice.size(e_z)) % lattice.size(e_z); }
 template <typename group>
 void measure_plaq(const GaugeField<group> &U, const parameters &p) {
 
-  static bool first = true;
+
+  auto plaq_z = measure_plaq_with_z(
+      U, p.twist_coeff);
+
+  print_formatted_numbers(plaq_z, "plaquette z", false, true);
+  hila::out0 << "plaquette: " << plaq_z.back() << '\n';
+}
+
+/**
+ * @brief Measures Polyakov lines and Wilson action with multicanonical weights
+ *
+ * @tparam group
+ * @param U GaugeField to measure
+ * @param p Parameter struct
+ */
+template <typename group>
+void measure_plaq_multicanonical(const GaugeField<group> &U,
+                                 const parameters &p) {
 
   auto plaq = measure_plaq_with_z(
       U, p.twist_coeff); /// (lattice.volume() * NDIM * (NDIM - 1) / 2);
 
-  if (first) {
-    hila::out0 << "plaquette: ";
-    for (int i = 0; i < plaq.size() - 1; i++)
-      hila::out0 << i << " ";
-    hila::out0 << "sum \n";
-    first = false;
-  }
-
-  // write the -(polyakov potential) first, this is used as a weight factor in
-  // aa auto sum = std::reduce(plaq.begin(), plaq.end() - 1);
-  hila::out0 << "plaquette: ";
-  for (int i = 0; i < plaq.size(); i++) {
-    hila::out0 << plaq[i] << " ";
-  }
-  hila::out0 << "\n";
+  print_formatted_numbers(plaq, "plaquette", false, true);
+  hila::out0 << "muca_plaquette: " << hila::muca::weight(plaq.back()) << '\n';
 }
 
 template <typename group>
 void measure_poly(const GaugeField<group> &U, const parameters &p) {
-  static bool first = true;
-  auto poly = measure_polyakov_twist(U);
-  if (first) {
-    hila::out0 << "polyakov: ";
-    for (int i = 0; i < poly.size() - 1; i++)
-      hila::out0 << i << ", ";
-    hila::out0 << "sum \n";
-    first = false;
-  }
-  hila::out0 << "polyakov: ";
-  for (int i = 0; i < poly.size(); i++) {
-    hila::out0 << poly[i] << ", ";
-  }
-  hila::out0 << "\n";
+  auto poly_z = measure_polyakov_with_z(U);
+  auto poly_abs = measure_polyakov_with_z_abs(U);
+
+  print_formatted_numbers(poly_z, "polyakov z", false, true);
+  print_formatted_numbers(poly_abs, "polyakov abs z", false, true);
+  hila::out0 << "polyakov: " << poly_z.back() << '\n';
+  hila::out0 << "polyakov abs: " << poly_abs.back() << '\n';
+}
+
+template <typename group>
+void measure_poly_multicanonical(const GaugeField<group> &U,
+                                 const parameters &p) {
+  auto poly = measure_polyakov_with_z(U);
+  auto poly_abs = measure_polyakov_with_z_abs(U);
+
+  print_formatted_numbers(poly, "polyakov z", false, true);
+  print_formatted_numbers(poly_abs, "polyakov abs z", false, true);
+  hila::out0 << "polyakov: " << poly.back() << '\n';
+  hila::out0 << "polyakov abs: " << poly_abs.back() << '\n';
+
+  hila::out0 << "muca_polyakov: " << hila::muca::weight(poly_abs.back())
+             << '\n';
 }
 
 /**
@@ -84,11 +102,45 @@ void measure_poly(const GaugeField<group> &U, const parameters &p) {
  */
 template <typename group>
 void update(GaugeField<group> &U, const parameters &p, bool relax) {
-
   foralldir(d) {
     for (Parity par : {EVEN, ODD}) {
 
       update_parity_dir(U, p, par, d, relax);
+    }
+  }
+}
+
+template <typename group>
+void update_multicanonical(GaugeField<group> &U, const parameters &p,
+                           bool relax) {
+  foralldir(d) {
+    for (Parity par : {EVEN, ODD}) {
+      if (p.muca_poly) {
+        if (d == e_t) {
+          auto U_old = U;
+          update_parity_dir(U, p, par, d, relax);
+          auto OP = measure_polyakov_with_z_abs(U);
+          auto OP_old = measure_polyakov_with_z_abs(U_old);
+          // hila::out0 << "OP old: " << OP_old.back() << " OP new: " <<
+          // OP.back() << std::endl;
+          if (!hila::muca::accept_reject(OP_old.back(), OP.back())) {
+            U = U_old;
+          }
+        } else {
+          update_parity_dir(U, p, par, d, relax);
+        }
+      }
+      if (p.muca_action) {
+        auto U_old = U;
+        update_parity_dir(U, p, par, d, relax);
+        auto OP = measure_plaq_with_z(U, p.twist_coeff);
+        auto OP_old = measure_plaq_with_z(U_old, p.twist_coeff);
+        // hila::out0 << "OP old: " << OP_old.back() << " OP new: " << OP.back()
+        // << std::endl;
+        if (!hila::muca::accept_reject(OP_old.back(), OP.back())) {
+          U = U_old;
+        }
+      }
     }
   }
 }
@@ -149,42 +201,93 @@ void update_parity_dir(GaugeField<group> &U, const parameters &p, Parity par,
  */
 template <typename group>
 void do_trajectory(GaugeField<group> &U, const parameters &p) {
-
+  auto U_old = U;
   for (int n = 0; n < p.n_update; n++) {
     for (int i = 0; i < p.n_overrelax; i++) {
       update(U, p, true);
     }
+
     update(U, p, false);
   }
   U.reunitarize_gauge();
 }
 
+/**
+ * @brief Evolve gauge field with multicanonical update
+ * @details Evolution happens by means of heat bath and over relaxation. For
+ * each heatbath update (p.n_update) we update p.n_overrelax times with over
+ * relaxation.
+ *
+ * @tparam group
+ * @param U
+ * @param p
+ */
+template <typename group>
+void do_trajectory_multicanonical(GaugeField<group> &U, const parameters &p) {
+  for (int n = 0; n < p.n_update; n++) {
+    for (int i = 0; i < p.n_overrelax; i++) {
+      update_multicanonical(U, p, true);
+    }
+
+    update_multicanonical(U, p, false);
+  }
+  U.reunitarize_gauge();
+}
+
+/**
+ * @brief Create weight function with multicanonical method
+ *
+ * @param U Gauge field
+ * @param p Parameters struct
+ */
+void iterate_weights_multicanonical(GaugeField<mygroup> U,
+                                    const parameters &p) {
+
+  hila::out0 << "here also\n";
+  bool iterate_status = true;
+  while (iterate_status) {
+    for (int i = 0; i < p.muca_updates; i++) {
+      do_trajectory_multicanonical(U, p);
+    }
+    if (p.muca_action) {
+      auto OP = measure_plaq_with_z(U, p.twist_coeff);
+      auto P = measure_polyakov_with_z(U);
+      hila::out0 << "Order parameter: " << OP.back() << std::endl;
+      hila::out0 << "polyakov muca: " << P.back() << std::endl;
+      iterate_status = hila::muca::iterate_weights(OP.back());
+    } else {
+      auto OP = measure_polyakov_with_z_abs(U);
+      auto Plaq = measure_plaq_with_z(U, p.twist_coeff);
+      auto Poly = measure_polyakov_with_z(U);
+      hila::out0 << "Order parameter: " << abs(OP.back()) << std::endl;
+      hila::out0 << "plaquette muca: "<< Plaq.back() << std::endl;
+      hila::out0 << "polyakov muca: "<< Poly.back() << std::endl;
+
+      iterate_status = hila::muca::iterate_weights(OP.back());
+    }
+  }
+  hila::muca::write_weight_function(hila::muca::generate_outfile_name());
+}
+
 int main(int argc, char **argv) {
-
-  // hila::initialize should be called as early as possible
-  hila::initialize(argc, argv);
-
-  // hila provides an input class hila::input, which is
-  // a convenient way to read in parameters from input files.
-  // parameters are presented as key - value pairs, as an example
-  //  " lattice size  64, 64, 64, 64"
-  // is read below.
-  //
-  // Values are broadcast to all MPI nodes.
-  //
-  // .get() -method can read many different input types,
-  // see file "input.h" for documentation
-
   parameters p;
+  CoordinateVector lsize;
+  hila::cmdline.add_flag("-beta", "Temparature");
+  hila::cmdline.add_flag("-twist", "Twist coefficient");
+  hila::cmdline.add_flag("-config", "Config filename");
+  hila::cmdline.add_flag("-ntraj", "Number of trajectories");
+  hila::cmdline.add_flag("-lsize", "Lattice size");
+  hila::cmdline.add_flag("-out-folder", "Output folder");
+  hila::initialize(argc, argv);
 
   hila::out0 << "SU(" << mygroup::size() << ") heat bath + overrelax update\n";
 
   hila::input par("parameters");
 
-  CoordinateVector lsize;
   lsize = par.get("lattice size"); // reads NDIM numbers
 
   p.beta = par.get("beta");
+
   // deltab sets system to different beta on different sides, by beta*(1 +-
   // deltab) use for initial config generation only
   p.deltab = par.get("delta beta fraction");
@@ -200,42 +303,133 @@ int main(int argc, char **argv) {
   p.n_save = par.get("traj/saved");
   // measure surface properties and print "profile"
   p.config_file = par.get("config name");
-  p.twist_coeff = par.get("twist_coeff");
+  p.twist_coeff = par.get("twist coeff");
+
+  if (par.get_item("updates/profile meas", {"off", "%i"}) == 1) {
+    p.n_profile = par.get();
+  } else {
+    p.n_profile = 0;
+  }
+  if (p.n_profile) {
+    p.n_smear = par.get("smearing steps");
+    p.smear_coeff = par.get("smear coefficient");
+    p.z_smear = par.get("z smearing steps");
+    p.n_surface = par.get("traj/surface");
+    p.n_dump_polyakov = par.get("traj/polyakov dump");
+
+    if (p.n_smear.size() != p.z_smear.size()) {
+      hila::out0 << "Error in input file: number of values in 'smearing "
+                    "steps' != 'z "
+                    "smearing steps'\n";
+      hila::terminate(0);
+    }
+
+  } else {
+    p.n_dump_polyakov = 0;
+  }
+  p.muca_action = par.get("muca_action");
+  p.muca_poly = par.get("muca_poly");
+  p.muca_updates = par.get("muca_updates");
+  p.measure_surface = par.get("measure_surface");
+  std::string initial_state = par.get("initial_state");
 
   par.close(); // file is closed also when par goes out of scope
 
+  if (hila::cmdline.flag_present("-beta")) {
+    p.beta = hila::cmdline.get_double("-beta");
+    hila::out0 << "beta            " << p.beta << std::endl;
+  }
+  if (hila::cmdline.flag_present("-twist")) {
+    p.twist_coeff = hila::cmdline.get_int("-twist");
+    hila::out0 << "twist coeff     " << p.twist_coeff << std::endl;
+  }
+  if (hila::cmdline.flag_present("-config")) {
+    p.config_file = hila::cmdline.get_string("-config");
+  }
+  if (hila::cmdline.flag_present("-ntraj")) {
+    p.n_trajectories = hila::cmdline.get_int("-ntraj");
+    hila::out0 << "Trajectories    " << p.twist_coeff << std::endl;
+  }
+  if (hila::cmdline.flag_present("-lsize")) {
+    for (int i = 0; i < NDIM; i++) {
+      lsize[i] = hila::cmdline.get_int("-lsize", i);
+    }
+    hila::out0 << "Lattice size    ";
+    for (int i = 0; i < NDIM; i++) {
+      hila::out0 << lsize[i] << " ";
+    }
+    hila::out0 << std::endl;
+  }
+  if (hila::cmdline.flag_present("-out-folder")) {
+    p.out_folder = hila::cmdline.get_string("-out-folder");
+  } else {
+    p.out_folder = "./";
+  }
   // setting up the lattice is convenient to do after reading
   // the parameter
   lattice.setup(lsize);
+  //  Alloc gauge field
 
-  // Alloc gauge field
-  GaugeField<mygroup> U;
-
-  U = 1;
-
-  // use negative trajectory for thermal
+  // U = initial_state;
+  //  use negative trajectory for thermal
   int start_traj = -p.n_thermal;
 
   hila::timer update_timer("Updates");
   hila::timer measure_timer("Measurements");
-
-  restore_checkpoint(U, start_traj, p);
+  hila::timer muca_timer("Muca");
+  GaugeField<mygroup> U;
 
   // We need random number here
   if (!hila::is_rng_seeded())
     hila::seed_random(seed);
+
+  if (initial_state == "cold") {
+    foralldir(d) onsites(ALL) { U[d][X].gaussian_random(); }
+  } else if (initial_state == "hot") {
+    U = 1;
+  } else if (initial_state == "both") {
+    foralldir(d) onsites(EVEN) { U[d][X].gaussian_random(); }
+    foralldir(d) onsites(ODD) { U[d][X] = 1; }
+  }
+
+  // restore_checkpoint(U, start_traj, p);
+
+  //  muca_timer.start();
+
+  if (p.muca_action || p.muca_poly) {
+    hila::muca::initialise("muca_parameters");
+    std::ofstream MFile;
+    MFile.open("muca_measurements", std::ios_base::app);
+    iterate_weights_multicanonical(U, p);
+  }
+  // muca_timer.stop();
   hila::out0 << "MEASURE start\n";
+  void (*do_trajectory_ptr)(GaugeField<mygroup> &, const parameters &);
+  void (*measure_plaquette_ptr)(const GaugeField<mygroup> &,
+                                const parameters &);
+  void (*measure_polyakov_ptr)(const GaugeField<mygroup> &, const parameters &);
+  if (p.muca_action) {
+    do_trajectory_ptr = do_trajectory_multicanonical<mygroup>;
+    measure_plaquette_ptr = measure_plaq_multicanonical<mygroup>;
+    measure_polyakov_ptr = measure_poly<mygroup>;
+  } else if (p.muca_poly) {
+    do_trajectory_ptr = do_trajectory_multicanonical<mygroup>;
+    measure_plaquette_ptr = measure_plaq<mygroup>;
+    measure_polyakov_ptr = measure_poly_multicanonical<mygroup>;
+  } else {
+    do_trajectory_ptr = do_trajectory<mygroup>;
+    measure_plaquette_ptr = measure_plaq<mygroup>;
+    measure_polyakov_ptr = measure_poly<mygroup>;
+  }
 
   for (int trajectory = start_traj; trajectory < p.n_trajectories;
        trajectory++) {
-
     double ttime = hila::gettime();
 
     update_timer.start();
 
     double acc = 0;
-
-    do_trajectory(U, p);
+    do_trajectory_ptr(U, p);
 
     // put sync here in order to get approx gpu timing
     hila::synchronize_threads();
@@ -245,9 +439,12 @@ int main(int argc, char **argv) {
     if (trajectory >= 0) {
       measure_timer.start();
 
-      measure_plaq(U, p);
+      measure_plaquette_ptr(U, p);
 
-      measure_poly(U, p);
+      measure_polyakov_ptr(U, p);
+
+      if (p.measure_surface)
+        measure_polyakov_surface(U, p, trajectory);
 
       // hila::out0 << "Measure_end " << trajectory << std::endl;
 
@@ -258,7 +455,8 @@ int main(int argc, char **argv) {
       checkpoint(U, trajectory, p);
     }
   }
+  
   hila::out0 << "MEASURE end\n";
-
+  hila::out0 << expi(4.0 / 3.0 * M_PI) << std::endl;
   hila::finishrun();
 }

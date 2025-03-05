@@ -72,14 +72,22 @@ void gather_test() {
 
 void test_std_gathers() {
     // gather_test<int>();
+    auto t0 = hila::gettime();
+
+#ifdef MPI_BENCHMARK_TEST
+    hila::out0 << "MPI_BENCHMARK_TEST defined, not doing communication tests!\n";
+    return;
+#endif
+
     gather_test();
 
 #if defined(CUDA) || defined(HIP)
     gpuMemPoolPurge();
 #endif
 
-    hila::timestamp("Communication tests done");
-    print_dashed_line();
+    hila::out0 << "Communication tests done - time " << hila::gettime() - t0 << "s\n";
+
+    hila::print_dashed_line();
 
     if (hila::myrank() == 0)
         hila::out.flush();

@@ -68,7 +68,8 @@ class DiagonalMatrix {
      * @brief Element access - e(i) gives diagonal element i
      *
      */
-
+    
+    #pragma hila loop_function
     inline T e(const int i) const {
         return c[i];
     }
@@ -128,7 +129,6 @@ class DiagonalMatrix {
     }
 
 
-
     /**
      * @brief Boolean operator != to check if matrices are exactly different
      */
@@ -142,8 +142,6 @@ class DiagonalMatrix {
      * Assignment operators: assign from another DiagonalMatrix, scalar or initializer list
      */
 
-
-#pragma hila loop_function
     template <typename S, std::enable_if_t<hila::is_assignable<T &, S>::value, int> = 0>
     inline DiagonalMatrix &operator=(const DiagonalMatrix<n, S> &rhs) out_only & {
 
@@ -153,8 +151,8 @@ class DiagonalMatrix {
         return *this;
     }
 
-// Assign from "scalar"
-#pragma hila loop_function
+    // Assign from "scalar"
+
     template <typename S, std::enable_if_t<hila::is_assignable<T &, S>::value, int> = 0>
     inline DiagonalMatrix &operator=(const S &rhs) out_only & {
 
@@ -164,8 +162,8 @@ class DiagonalMatrix {
         return *this;
     }
 
-// Assign from initializer list
-#pragma hila loop_function
+    // Assign from initializer list
+
     template <typename S, std::enable_if_t<hila::is_assignable<T &, S>::value, int> = 0>
     inline DiagonalMatrix &operator=(std::initializer_list<S> rhs) out_only & {
         assert(rhs.size() == n && "Initializer list has a wrong size in assignment");
@@ -178,7 +176,7 @@ class DiagonalMatrix {
 
 
     // +=
-#pragma hila loop_function
+
     template <typename S, std::enable_if_t<hila::is_assignable<T &, S>::value, int> = 0>
     DiagonalMatrix &operator+=(const DiagonalMatrix<n, S> &rhs) & {
         for (int i = 0; i < n; i++) {
@@ -187,7 +185,7 @@ class DiagonalMatrix {
         return *this;
     }
 
-#pragma hila loop_function
+
     template <typename S, std::enable_if_t<hila::is_assignable<T &, S>::value, int> = 0>
     DiagonalMatrix &operator+=(const S &rhs) & {
         for (int i = 0; i < n; i++) {
@@ -197,7 +195,7 @@ class DiagonalMatrix {
     }
 
     // -=
-#pragma hila loop_function
+
     template <typename S, std::enable_if_t<hila::is_assignable<T &, S>::value, int> = 0>
     DiagonalMatrix &operator-=(const DiagonalMatrix<n, S> &rhs) & {
         for (int i = 0; i < n; i++) {
@@ -206,7 +204,7 @@ class DiagonalMatrix {
         return *this;
     }
 
-#pragma hila loop_function
+
     template <typename S, std::enable_if_t<hila::is_assignable<T &, S>::value, int> = 0>
     DiagonalMatrix &operator-=(const S &rhs) & {
         for (int i = 0; i < n; i++) {
@@ -216,7 +214,7 @@ class DiagonalMatrix {
     }
 
     // *=
-#pragma hila loop_function
+
     template <typename S,
               std::enable_if_t<hila::is_assignable<T &, hila::type_mul<T, S>>::value, int> = 0>
     DiagonalMatrix &operator*=(const DiagonalMatrix<n, S> &rhs) & {
@@ -226,7 +224,7 @@ class DiagonalMatrix {
         return *this;
     }
 
-#pragma hila loop_function
+
     template <typename S,
               std::enable_if_t<hila::is_assignable<T &, hila::type_mul<T, S>>::value, int> = 0>
     DiagonalMatrix &operator*=(const S &rhs) & {
@@ -237,7 +235,7 @@ class DiagonalMatrix {
     }
 
     // /=
-#pragma hila loop_function
+
     template <typename S,
               std::enable_if_t<hila::is_assignable<T &, hila::type_div<T, S>>::value, int> = 0>
     DiagonalMatrix &operator/=(const DiagonalMatrix<n, S> &rhs) & {
@@ -247,7 +245,7 @@ class DiagonalMatrix {
         return *this;
     }
 
-#pragma hila loop_function
+
     template <typename S,
               std::enable_if_t<hila::is_assignable<T &, hila::type_div<T, S>>::value, int> = 0>
     DiagonalMatrix &operator/=(const S &rhs) & {
