@@ -1116,7 +1116,7 @@ static bool iterate_weight_function_direct_single(const double OP,
             continue_iteration = false;
         }
 
-        //write_weight_function("intermediate_weight.dat");
+        write_weight_function("intermediate_weight.dat");
         hila::out0 << "Update size C = " << g_WParam.DIP.C << "\n\n";
         }
     }
